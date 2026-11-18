@@ -28,7 +28,7 @@
     },
     {
      "key": "Access-Control-Allow-Origin",
-     "value": "https://deliveryeta.vercel.app"
+     "value": "https://deliveryeta-delta.vercel.app"
     },
     {
      "key": "Content-Security-Policy",
