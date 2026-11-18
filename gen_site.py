@@ -1,0 +1,116 @@
+import json
+m = json.load(open("model.json"))
+features, mean, std = m["features"], m["mean"], m["std"]
+coef, icpt = m["coef"], m["intercept"]
+mt = m["metrics"]
+r2, mae, rmse, base_mae, mean_cost = mt["cv_r2"], mt["cv_mae"], mt["cv_rmse"], mt["baseline_mae"], mt["mean_cost"]
+DOMAIN = "deliveryeta.vercel.app"
+JS_MODEL = f"""const MEAN = {json.dumps(mean)};
+const STD = {json.dumps(std)};
+const COEF = {json.dumps(coef)};
+const INTERCEPT = {icpt};
+function etaPred(vals){{
+  let z = INTERCEPT;
+  for (let i = 0; i < 6; i++) z += COEF[i] * (vals[i] - MEAN[i]) / STD[i];
+  return Math.max(z, 10);
+}}"""
+index = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeliveryETA — Food Delivery Time Predictor | AI/ML Project</title>
+<meta name="description" content="DeliveryETA predicts how long a food delivery order will take from distance, restaurant prep time, traffic, order size, rider experience and peak hours, using a ridge regression model trained on 600 synthetic delivery orders. Try it live in your browser.">
+<link rel="canonical" href="https://{DOMAIN}/">
+<meta property="og:title" content="DeliveryETA — Food Delivery Time Predictor">
+<meta property="og:description" content="Enter your order details and instantly see the predicted delivery time, with a real trained ML model running in your browser.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://{DOMAIN}/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="DeliveryETA — Food Delivery Time Predictor">
+<meta name="twitter:description" content="Ridge regression food delivery time predictor. Try the live demo in your browser.">
+<script type="application/ld+json">{{"@context":"https://schema.org","@type":"WebApplication","name":"DeliveryETA","applicationCategory":"EducationalApplication","description":"Food delivery time predictor using ridge regression.","url":"https://{DOMAIN}/"}}</script>
+<style>
+body{{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;max-width:720px;margin:0 auto;padding:24px;line-height:1.5}}
+h1{{font-size:2em}} label{{display:block;margin:12px 0 4px;font-weight:bold}}
+input,select{{width:100%;padding:10px;font-size:16px;border:1px solid #000;border-radius:4px;box-sizing:border-box}}
+button{{margin-top:16px;margin-right:8px;padding:12px 24px;font-size:17px;background:#000;color:#fff;border:none;border-radius:4px;cursor:pointer}}
+#result{{margin-top:24px;padding:20px;border:2px solid #000;border-radius:8px;display:none}}
+#result b{{font-size:1.6em}}
+.note{{color:#333;font-size:.95em}} code{{background:#f2f2f2;padding:2px 5px}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}}
+</style>
+</head>
+<body>
+<h1>&#127829; DeliveryETA — Food Delivery Time Predictor</h1>
+<p class="note">A 2nd-year B.Tech AI/ML project by Vikranth Reddy. A ridge regression model trained on 600 synthetic food delivery orders predicts the delivery time from distance, restaurant prep time, traffic level, order size, rider experience and peak hours. 5-fold CV: <b>R&sup2; = {r2:.3f}</b>, <b>MAE = {mae:.2f} min</b> vs a mean-guess baseline MAE of {base_mae:.2f} min (mean delivery time {mean_cost:.1f} min).</p>
+<div class="grid">
+<label>Distance (km)<input type="number" step="0.5" min="1" max="15" id="f0" value="3.0"></label>
+<label>Restaurant prep time (minutes)<input type="number" step="1" min="5" max="45" id="f1" value="15"></label>
+<label>Traffic level<select id="f2"><option value="1" selected>1 — Clear roads</option><option value="2">2 — Light</option><option value="3">3 — Moderate</option><option value="4">4 — Heavy</option><option value="5">5 — Jammed</option></select></label>
+<label>Number of items<input type="number" step="1" min="1" max="10" id="f3" value="2"></label>
+<label>Rider experience (years)<input type="number" step="0.5" min="0" max="5" id="f4" value="3.0"></label>
+<label>Peak hour?<select id="f5"><option value="0" selected>No — off-peak</option><option value="1">Yes — peak hour</option></select></label>
+</div>
+<button onclick="predict()">Predict Delivery Time</button>
+<button onclick="tryRush()">Try a peak-hour rush order</button>
+<button onclick="tryQuick()">Try a quick nearby order</button>
+<div id="result"></div>
+<p class="note">How it works: your six numbers are standardised (subtract the training mean, divide by the standard deviation), multiplied by the model&apos;s learned weights, and summed with a bias to give the delivery time in minutes; predictions are floored at 10 minutes. The exact same weights run in this page and in the Python training script (<code>train.py</code>), so the browser result matches the trained model.</p>
+<p class="note">Try it: a nearby 3 km order with 15 minutes of prep, clear roads, 2 items, an experienced rider, off-peak &rarr; about 23.9 minutes. A far 12 km order with 40 minutes of prep, jammed traffic, 8 items, a new rider, at peak hour &rarr; about 73.6 minutes. A mid-range 7 km order with 25 minutes of prep, moderate traffic, 4 items, off-peak &rarr; about 43.2 minutes.</p>
+<p class="note">Honest note: this model was trained on synthetic orders generated from simple delivery logic, so it is a classroom demo — real delivery times also depend on the exact route, weather, the restaurant&apos;s live queue and the rider&apos;s actual path, which six numbers can&apos;t capture.</p>
+<p><a href="https://github.com/HVRGAMING2705/deliveryeta">View source on GitHub</a></p>
+<script>
+{JS_MODEL}
+function show(){{
+  const vals = [];
+  for (let i = 0; i < 6; i++) vals.push(parseFloat(document.getElementById("f" + i).value) || 0);
+  const eta = etaPred(vals);
+  const el = document.getElementById("result");
+  el.style.display = "block";
+  const verdict = vals[2] >= 4 && vals[5] === 1 ? "&#128308; RUSH HOUR + JAMMED ROADS — traffic and peak hour are the biggest delays" : vals[2] >= 4 ? "&#128993; HEAVY TRAFFIC — the roads are the main slowdown here" : eta >= 60 ? "&#128993; LONG TRIP — distance and prep time push this order past an hour" : "&#128994; QUICK ORDER — short distance, light traffic, should arrive fast";
+  el.innerHTML = "<b>" + eta.toFixed(1) + " min</b><br>" + verdict;
+}}
+function predict(){{ show(); }}
+function tryRush(){{ const v = [12.0, 40.0, 5, 8, 0.5, 1]; for (let i = 0; i < 6; i++) document.getElementById("f" + i).value = v[i]; show(); }}
+function tryQuick(){{ const v = [3.0, 15.0, 1, 2, 3.0, 0]; for (let i = 0; i < 6; i++) document.getElementById("f" + i).value = v[i]; show(); }}
+</script>
+</body>
+</html>
+"""
+open("index.html", "w").write(index)
+vercel = {
+ "headers": [{"headers": [
+   {"key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload"},
+   {"key": "X-Content-Type-Options", "value": "nosniff"},
+   {"key": "X-Frame-Options", "value": "SAMEORIGIN"},
+   {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"},
+   {"key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()"},
+   {"key": "Cross-Origin-Opener-Policy", "value": "same-origin"},
+   {"key": "Access-Control-Allow-Origin", "value": f"https://{DOMAIN}"},
+   {"key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'self'"}],
+  "source": "/(.*)"}]}
+open("vercel.json", "w").write(json.dumps(vercel, indent=1))
+open("404.html", "w").write(f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Page Not Found — DeliveryETA</title><style>body{{font-family:Arial,sans-serif;color:#000;max-width:640px;margin:60px auto;padding:24px}}</style></head><body><h1>404 — Page not found</h1><p>This page does not exist on DeliveryETA.</p><p><a href="https://{DOMAIN}/">Back to DeliveryETA</a></p></body></html>""")
+open("robots.txt", "w").write(f"User-agent: *\nAllow: /\nSitemap: https://{DOMAIN}/sitemap.xml\n")
+open("sitemap.xml", "w").write(f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://{DOMAIN}/</loc></url></urlset>
+""")
+open("README.md", "w").write(f"""# DeliveryETA — Food Delivery Time Predictor
+
+A 2nd-year B.Tech AI/ML project by Vikranth Reddy (Woxsen University).
+
+Ridge regression (alpha=1.0) on standardized features — distance (km), restaurant prep time (min), traffic level (1-5), number of items, rider experience (years), peak hour — trained on 600 synthetic food delivery orders (seed 42).
+
+- 5-fold CV R&sup2;: {r2:.3f}, MAE: {mae:.2f} min (mean-guess baseline MAE: {base_mae:.2f} min); mean delivery time {mean_cost:.1f} min
+- Live demo: https://{DOMAIN} (runs fully in the browser — no backend)
+- `train.py` trains the model and writes `model.json`; `index.html` applies the same weights in JavaScript.
+
+Note: classroom demo on synthetic orders — real delivery times also depend on the exact route, weather, the restaurant's live queue and the rider's actual path.
+""")
+samples = json.load(open("parity_samples.json"))
+parity = JS_MODEL + "\n" + "\n".join(
+    f"console.log(JSON.stringify({{row: {json.dumps(s['row'])}, js: etaPred({json.dumps(s['row'])}), py: {s['pred']}}}));"
+    for s in samples)
+open("parity.js", "w").write(parity)
+print("site files written, R2", r2)
